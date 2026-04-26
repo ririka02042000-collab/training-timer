@@ -2,7 +2,9 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>トレーニングタイマー</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -14,7 +16,9 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
+      min-height: 100dvh;
+      padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+               env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
     }
 
     .container {
@@ -24,15 +28,6 @@
       border-radius: 24px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.4);
       width: 320px;
-    }
-
-    h1 {
-      font-size: 1.4rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: #a0b4ff;
-      margin-bottom: 28px;
-      white-space: nowrap;
     }
 
     /* ── ドラムピッカー ── */
@@ -60,7 +55,6 @@
       cursor: grab;
       touch-action: none;
     }
-
     .drum:active { cursor: grabbing; }
 
     .drum::before,
@@ -156,6 +150,7 @@
       font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
       transition: opacity 0.15s, transform 0.1s;
     }
     button:active { transform: scale(0.96); }
@@ -174,7 +169,7 @@
 </head>
 <body>
 <div class="container">
-  <h1>トレーニングタイマー</h1>
+  <!-- タイトルなし -->
 
   <div class="picker-wrap">
     <div class="drum" id="drum-min">
@@ -205,50 +200,87 @@
 </div>
 
 <script>
+// ── 音声 (iOS 対応) ────────────────────────────────
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+function unlockAudio() {
+  const ctx = getAudioCtx();
+  if (ctx.state === 'suspended') ctx.resume();
+}
+
+function beep() {
+  const ctx = getAudioCtx();
+  const play = () => {
+    [0, 0.18].forEach(delay => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.15);
+    });
+  };
+  if (ctx.state === 'suspended') {
+    ctx.resume().then(play);
+  } else {
+    play();
+  }
+}
+
 // ── ドラムピッカー ────────────────────────────────
 const ITEM_H = 44;
 const DRUM_H = 150;
-
-// リストの先頭に追加するパディングアイテム数（上下に見えるアイテム数）
-const PAD = 2;
+const PAD    = 2;
+const CENTER_OFFSET = (DRUM_H - ITEM_H) / 2; // 53
 
 function buildDrum(listEl, count, initialValue, onChange) {
-  // PAD個の空アイテム → 実値 0..count-1 → PAD個の空アイテム
+  // 上パッド（空）
   for (let i = 0; i < PAD; i++) {
     const div = document.createElement('div');
     div.className = 'drum-item';
     listEl.appendChild(div);
   }
+  // 実アイテム 0..count-1
   for (let i = 0; i < count; i++) {
     const div = document.createElement('div');
     div.className = 'drum-item';
     div.textContent = String(i).padStart(2, '0');
     listEl.appendChild(div);
   }
+  // 下パッド（空）
   for (let i = 0; i < PAD; i++) {
     const div = document.createElement('div');
     div.className = 'drum-item';
     listEl.appendChild(div);
   }
 
-  // 実値 v (0..count-1) に対応するリスト内の先頭Y座標
-  // パッドが PAD 個あるので、値 v のアイテムは (PAD + v) 番目
-  // リストの translateY を t とすると、アイテム中心は: t + (PAD+v)*ITEM_H + ITEM_H/2
-  // これを DRUM_H/2 (=75) に合わせる
-  // t = DRUM_H/2 - ITEM_H/2 - (PAD+v)*ITEM_H = (DRUM_H-ITEM_H)/2 - (PAD+v)*ITEM_H
-  const CENTER_OFFSET = (DRUM_H - ITEM_H) / 2; // = 53
-
+  // 値 v に対応する listEl の translateY
   function valueToY(v) {
     return CENTER_OFFSET - (PAD + v) * ITEM_H;
   }
 
+  // translateY から値に変換（端でクランプ）
   function yToValue(y) {
-    // (PAD+v)*ITEM_H = CENTER_OFFSET - y
-    const idx = Math.round((CENTER_OFFSET - y) / ITEM_H) - PAD;
-    return ((idx % count) + count) % count;
+    const raw = Math.round((CENTER_OFFSET - y) / ITEM_H) - PAD;
+    return Math.max(0, Math.min(count - 1, raw));
   }
 
-  let currentY = valueToY(initialValue);
+  // スクロール可能なY範囲
+  const maxY = valueToY(0);           // 最小値(0)表示時
+  const minY = valueToY(count - 1);   // 最大値表示時
+
+  let currentY     = valueToY(initialValue);
   let currentValue = initialValue;
 
   function applyY(y, animate) {
@@ -260,22 +292,22 @@ function buildDrum(listEl, count, initialValue, onChange) {
   }
 
   function snapToValue(v, animate = true) {
-    currentValue = ((v % count) + count) % count;
+    currentValue = Math.max(0, Math.min(count - 1, v));
     applyY(valueToY(currentValue), animate);
     onChange(currentValue);
   }
 
-  // 初期位置（アニメなし）
   applyY(valueToY(initialValue), false);
 
-  // ─ ドラッグ操作 ─
-  let dragging = false;
-  let startY = 0;
+  // ─ ドラッグ ─
+  let dragging   = false;
+  let startPY    = 0;
   let startListY = 0;
-  let prevClientY = 0;
-  let prevTime = 0;
-  let velocity = 0;
-  let rafId = null;
+  let prevPY     = 0;
+  let prevTime   = 0;
+  let velocity   = 0;
+  let rafId      = null;
+  const RESISTANCE = 0.25; // 端を超えたときの引っ張り抵抗
 
   const drum = listEl.parentElement;
 
@@ -284,12 +316,12 @@ function buildDrum(listEl, count, initialValue, onChange) {
   }
 
   drum.addEventListener('pointerdown', e => {
-    dragging = true;
-    startY = getClientY(e);
+    dragging   = true;
+    startPY    = getClientY(e);
     startListY = currentY;
-    prevClientY = startY;
-    prevTime = Date.now();
-    velocity = 0;
+    prevPY     = startPY;
+    prevTime   = Date.now();
+    velocity   = 0;
     listEl.style.transition = 'none';
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     drum.setPointerCapture(e.pointerId);
@@ -297,28 +329,55 @@ function buildDrum(listEl, count, initialValue, onChange) {
 
   drum.addEventListener('pointermove', e => {
     if (!dragging) return;
-    const cy = getClientY(e);
-    const dy = cy - startY;
+    const cy  = getClientY(e);
+    const raw = startListY + (cy - startPY);
     const now = Date.now();
-    const dt = Math.max(1, now - prevTime);
-    velocity = (cy - prevClientY) / dt * 16;
-    prevClientY = cy;
-    prevTime = now;
-    applyY(startListY + dy, false);
+    velocity  = (cy - prevPY) / Math.max(1, now - prevTime) * 16;
+    prevPY    = cy;
+    prevTime  = now;
+
+    // 端を超えたら抵抗をかける
+    let y = raw;
+    if (raw > maxY) y = maxY + (raw - maxY) * RESISTANCE;
+    else if (raw < minY) y = minY + (raw - minY) * RESISTANCE;
+    applyY(y, false);
   });
 
-  drum.addEventListener('pointerup', () => {
+  drum.addEventListener('pointerup', e => {
     if (!dragging) return;
     dragging = false;
 
+    const moved = Math.abs(getClientY(e) - startPY);
+
+    // タップ判定（移動が小さければ選択）
+    if (moved < 8) {
+      const tapRelY  = e.clientY - drum.getBoundingClientRect().top;
+      const listIdx  = Math.floor((tapRelY - currentY) / ITEM_H);
+      const tapValue = listIdx - PAD;
+      snapToValue(tapValue);
+      return;
+    }
+
+    // 端を超えていたらクランプして即スナップ
+    if (currentY > maxY || currentY < minY) {
+      snapToValue(yToValue(currentY));
+      return;
+    }
+
+    // 慣性スクロール
     if (Math.abs(velocity) > 2) {
       function glide() {
+        currentY += velocity;
+        velocity *= 0.90;
+
+        // 端に達したら止める
+        if (currentY > maxY) { snapToValue(0); return; }
+        if (currentY < minY) { snapToValue(count - 1); return; }
+
         if (Math.abs(velocity) < 0.5) {
           snapToValue(yToValue(currentY));
           return;
         }
-        currentY += velocity;
-        velocity *= 0.90;
         listEl.style.transition = 'none';
         listEl.style.transform = `translateY(${currentY}px)`;
         rafId = requestAnimationFrame(glide);
@@ -329,6 +388,7 @@ function buildDrum(listEl, count, initialValue, onChange) {
     }
   });
 
+  // ホイール
   drum.addEventListener('wheel', e => {
     e.preventDefault();
     snapToValue(currentValue + (e.deltaY > 0 ? 1 : -1));
@@ -337,7 +397,7 @@ function buildDrum(listEl, count, initialValue, onChange) {
   return {
     getValue: () => currentValue,
     setValue: (v) => snapToValue(v, false),
-    disable: (d) => { drum.style.pointerEvents = d ? 'none' : ''; }
+    disable:  (d) => { drum.style.pointerEvents = d ? 'none' : ''; }
   };
 }
 
@@ -380,22 +440,6 @@ function updateDisplay() {
   ring.classList.toggle('danger', remaining <= 10 && remaining > 0);
 }
 
-function beep() {
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  [0, 0.18].forEach(delay => {
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
-    osc.start(ctx.currentTime + delay);
-    osc.stop(ctx.currentTime + delay + 0.15);
-  });
-}
-
 function finish() {
   clearInterval(timerId);
   timerId = null;
@@ -422,6 +466,7 @@ function tick() {
 }
 
 btnStart.addEventListener('click', () => {
+  unlockAudio(); // iOS: ユーザー操作でAudioContextを解放
   if (running) {
     clearInterval(timerId);
     timerId = null;
@@ -440,6 +485,7 @@ btnStart.addEventListener('click', () => {
 });
 
 btnReset.addEventListener('click', () => {
+  unlockAudio();
   clearInterval(timerId);
   timerId = null;
   running = false;
