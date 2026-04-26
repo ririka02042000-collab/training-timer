@@ -3,13 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>筋トレタイマー</title>
+  <title>トレーニングタイマー</title>
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background: #1a1a2e;
@@ -35,60 +31,96 @@
       font-weight: 600;
       letter-spacing: 0.08em;
       color: #a0b4ff;
-      margin-bottom: 32px;
+      margin-bottom: 28px;
+      white-space: nowrap;
     }
 
-    .time-setting {
+    /* ── ドラムピッカー ── */
+    .picker-wrap {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      margin-bottom: 36px;
+      gap: 4px;
+      margin-bottom: 32px;
+      user-select: none;
     }
 
-    .time-setting label {
-      font-size: 0.85rem;
+    .picker-label {
+      font-size: 0.9rem;
       color: #888;
+      min-width: 20px;
+      text-align: left;
     }
 
-    .time-inputs {
+    .drum {
+      position: relative;
+      width: 72px;
+      height: 150px;
+      overflow: hidden;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .drum:active { cursor: grabbing; }
+
+    .drum::before,
+    .drum::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      height: 53px;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .drum::before {
+      top: 0;
+      background: linear-gradient(to bottom, #16213e 20%, transparent);
+    }
+    .drum::after {
+      bottom: 0;
+      background: linear-gradient(to top, #16213e 20%, transparent);
+    }
+
+    .drum-highlight {
+      position: absolute;
+      top: 50%;
+      left: 6px; right: 6px;
+      height: 44px;
+      transform: translateY(-50%);
+      border-top: 1px solid rgba(90,127,255,0.5);
+      border-bottom: 1px solid rgba(90,127,255,0.5);
+      background: rgba(90,127,255,0.1);
+      border-radius: 6px;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .drum-list {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      will-change: transform;
+    }
+
+    .drum-item {
+      height: 44px;
       display: flex;
       align-items: center;
-      gap: 4px;
-    }
-
-    .time-inputs input {
-      width: 52px;
-      padding: 6px 4px;
-      background: #0f3460;
-      border: 1px solid #2a4a80;
-      border-radius: 8px;
+      justify-content: center;
+      font-size: 1.7rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
       color: #eee;
-      font-size: 1.1rem;
-      text-align: center;
-      outline: none;
-      transition: border-color 0.2s;
     }
 
-    .time-inputs input:focus {
-      border-color: #5a7fff;
-    }
-
-    .time-inputs span {
-      color: #888;
-      font-size: 1rem;
-    }
-
+    /* ── タイマー表示 ── */
     .display {
       position: relative;
       width: 200px;
       height: 200px;
-      margin: 0 auto 36px;
+      margin: 0 auto 32px;
     }
 
-    .ring-bg {
-      stroke: #0f3460;
-    }
+    .ring-bg { stroke: #0f3460; }
 
     .ring-progress {
       stroke: #5a7fff;
@@ -97,10 +129,7 @@
       transform-origin: center;
       transform: rotate(-90deg);
     }
-
-    .ring-progress.danger {
-      stroke: #ff5a5a;
-    }
+    .ring-progress.danger { stroke: #ff5a5a; }
 
     .time-text {
       position: absolute;
@@ -113,6 +142,7 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* ── ボタン ── */
     .btn-row {
       display: flex;
       gap: 12px;
@@ -128,40 +158,35 @@
       cursor: pointer;
       transition: opacity 0.15s, transform 0.1s;
     }
-
-    button:active {
-      transform: scale(0.96);
-    }
+    button:active { transform: scale(0.96); }
 
     #btn-start {
       background: #5a7fff;
       color: #fff;
-      min-width: 100px;
+      min-width: 110px;
     }
-
     #btn-reset {
       background: #2a3a60;
       color: #aaa;
     }
-
-    button:disabled {
-      opacity: 0.4;
-      cursor: default;
-    }
+    button:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
 <div class="container">
-  <h1>筋トレタイマー</h1>
+  <h1>トレーニングタイマー</h1>
 
-  <div class="time-setting">
-    <label>時間設定</label>
-    <div class="time-inputs">
-      <input type="number" id="input-min" min="0" max="99" value="1" placeholder="00">
-      <span>分</span>
-      <input type="number" id="input-sec" min="0" max="59" value="30" placeholder="00">
-      <span>秒</span>
+  <div class="picker-wrap">
+    <div class="drum" id="drum-min">
+      <div class="drum-highlight"></div>
+      <div class="drum-list" id="list-min"></div>
     </div>
+    <span class="picker-label">分</span>
+    <div class="drum" id="drum-sec">
+      <div class="drum-highlight"></div>
+      <div class="drum-list" id="list-sec"></div>
+    </div>
+    <span class="picker-label">秒</span>
   </div>
 
   <div class="display">
@@ -180,123 +205,248 @@
 </div>
 
 <script>
-  const CIRCUMFERENCE = 2 * Math.PI * 88; // ≈553
+// ── ドラムピッカー ────────────────────────────────
+const ITEM_H = 44;
+const DRUM_H = 150;
 
-  const inputMin = document.getElementById('input-min');
-  const inputSec = document.getElementById('input-sec');
-  const display  = document.getElementById('display');
-  const ring     = document.getElementById('ring');
-  const btnStart = document.getElementById('btn-start');
-  const btnReset = document.getElementById('btn-reset');
+// リストの先頭に追加するパディングアイテム数（上下に見えるアイテム数）
+const PAD = 2;
 
-  let totalSeconds  = 0;
-  let remaining     = 0;
-  let timerId       = null;
-  let running       = false;
-
-  function getSettingSeconds() {
-    const m = Math.max(0, parseInt(inputMin.value) || 0);
-    const s = Math.max(0, Math.min(59, parseInt(inputSec.value) || 0));
-    return m * 60 + s;
+function buildDrum(listEl, count, initialValue, onChange) {
+  // PAD個の空アイテム → 実値 0..count-1 → PAD個の空アイテム
+  for (let i = 0; i < PAD; i++) {
+    const div = document.createElement('div');
+    div.className = 'drum-item';
+    listEl.appendChild(div);
+  }
+  for (let i = 0; i < count; i++) {
+    const div = document.createElement('div');
+    div.className = 'drum-item';
+    div.textContent = String(i).padStart(2, '0');
+    listEl.appendChild(div);
+  }
+  for (let i = 0; i < PAD; i++) {
+    const div = document.createElement('div');
+    div.className = 'drum-item';
+    listEl.appendChild(div);
   }
 
-  function formatTime(sec) {
-    const m = Math.floor(sec / 60).toString().padStart(2, '0');
-    const s = (sec % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
+  // 実値 v (0..count-1) に対応するリスト内の先頭Y座標
+  // パッドが PAD 個あるので、値 v のアイテムは (PAD + v) 番目
+  // リストの translateY を t とすると、アイテム中心は: t + (PAD+v)*ITEM_H + ITEM_H/2
+  // これを DRUM_H/2 (=75) に合わせる
+  // t = DRUM_H/2 - ITEM_H/2 - (PAD+v)*ITEM_H = (DRUM_H-ITEM_H)/2 - (PAD+v)*ITEM_H
+  const CENTER_OFFSET = (DRUM_H - ITEM_H) / 2; // = 53
+
+  function valueToY(v) {
+    return CENTER_OFFSET - (PAD + v) * ITEM_H;
   }
 
-  function updateDisplay() {
-    display.textContent = formatTime(remaining);
-    const ratio = totalSeconds > 0 ? remaining / totalSeconds : 1;
-    ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - ratio);
-    ring.classList.toggle('danger', remaining <= 10 && remaining > 0);
+  function yToValue(y) {
+    // (PAD+v)*ITEM_H = CENTER_OFFSET - y
+    const idx = Math.round((CENTER_OFFSET - y) / ITEM_H) - PAD;
+    return ((idx % count) + count) % count;
   }
 
-  function beep() {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.18].forEach(delay => {
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
-      osc.start(ctx.currentTime + delay);
-      osc.stop(ctx.currentTime + delay + 0.15);
-    });
+  let currentY = valueToY(initialValue);
+  let currentValue = initialValue;
+
+  function applyY(y, animate) {
+    currentY = y;
+    listEl.style.transition = animate
+      ? 'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94)'
+      : 'none';
+    listEl.style.transform = `translateY(${y}px)`;
   }
 
-  function finish() {
-    clearInterval(timerId);
-    timerId  = null;
-    running  = false;
-    beep();
-    setTimeout(resetToSetting, 600);
+  function snapToValue(v, animate = true) {
+    currentValue = ((v % count) + count) % count;
+    applyY(valueToY(currentValue), animate);
+    onChange(currentValue);
   }
 
-  function resetToSetting() {
-    totalSeconds = getSettingSeconds();
-    remaining    = totalSeconds;
-    ring.style.strokeDashoffset = 0;
-    ring.classList.remove('danger');
-    updateDisplay();
-    btnStart.textContent = 'スタート';
-    setInputsDisabled(false);
+  // 初期位置（アニメなし）
+  applyY(valueToY(initialValue), false);
+
+  // ─ ドラッグ操作 ─
+  let dragging = false;
+  let startY = 0;
+  let startListY = 0;
+  let prevClientY = 0;
+  let prevTime = 0;
+  let velocity = 0;
+  let rafId = null;
+
+  const drum = listEl.parentElement;
+
+  function getClientY(e) {
+    return e.touches ? e.touches[0].clientY : e.clientY;
   }
 
-  function setInputsDisabled(disabled) {
-    inputMin.disabled = disabled;
-    inputSec.disabled = disabled;
-  }
+  drum.addEventListener('pointerdown', e => {
+    dragging = true;
+    startY = getClientY(e);
+    startListY = currentY;
+    prevClientY = startY;
+    prevTime = Date.now();
+    velocity = 0;
+    listEl.style.transition = 'none';
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    drum.setPointerCapture(e.pointerId);
+  });
 
-  function tick() {
-    remaining--;
-    updateDisplay();
-    if (remaining <= 0) finish();
-  }
+  drum.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const cy = getClientY(e);
+    const dy = cy - startY;
+    const now = Date.now();
+    const dt = Math.max(1, now - prevTime);
+    velocity = (cy - prevClientY) / dt * 16;
+    prevClientY = cy;
+    prevTime = now;
+    applyY(startListY + dy, false);
+  });
 
-  btnStart.addEventListener('click', () => {
-    if (running) {
-      // 一時停止
-      clearInterval(timerId);
-      timerId = null;
-      running = false;
-      btnStart.textContent = '再開';
-    } else {
-      if (!timerId && remaining === 0) resetToSetting();
-      if (!timerId) {
-        totalSeconds = remaining > 0 ? totalSeconds : getSettingSeconds();
-        if (remaining === 0) remaining = totalSeconds;
+  drum.addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+
+    if (Math.abs(velocity) > 2) {
+      function glide() {
+        if (Math.abs(velocity) < 0.5) {
+          snapToValue(yToValue(currentY));
+          return;
+        }
+        currentY += velocity;
+        velocity *= 0.90;
+        listEl.style.transition = 'none';
+        listEl.style.transform = `translateY(${currentY}px)`;
+        rafId = requestAnimationFrame(glide);
       }
-      totalSeconds = totalSeconds || getSettingSeconds();
-      remaining    = remaining > 0 ? remaining : getSettingSeconds();
-      if (remaining <= 0) return;
-      running  = true;
-      setInputsDisabled(true);
-      btnStart.textContent = '一時停止';
-      timerId = setInterval(tick, 1000);
+      rafId = requestAnimationFrame(glide);
+    } else {
+      snapToValue(yToValue(currentY));
     }
   });
 
-  btnReset.addEventListener('click', () => {
+  drum.addEventListener('wheel', e => {
+    e.preventDefault();
+    snapToValue(currentValue + (e.deltaY > 0 ? 1 : -1));
+  }, { passive: false });
+
+  return {
+    getValue: () => currentValue,
+    setValue: (v) => snapToValue(v, false),
+    disable: (d) => { drum.style.pointerEvents = d ? 'none' : ''; }
+  };
+}
+
+// ── ピッカー初期化 ─────────────────────────────────
+let running = false;
+
+const minPicker = buildDrum(document.getElementById('list-min'), 100, 1, () => {
+  if (!running) resetToSetting();
+});
+const secPicker = buildDrum(document.getElementById('list-sec'), 60, 30, () => {
+  if (!running) resetToSetting();
+});
+
+// ── タイマーロジック ───────────────────────────────
+const CIRCUMFERENCE = 2 * Math.PI * 88;
+
+const display  = document.getElementById('display');
+const ring     = document.getElementById('ring');
+const btnStart = document.getElementById('btn-start');
+const btnReset = document.getElementById('btn-reset');
+
+let totalSeconds = 0;
+let remaining    = 0;
+let timerId      = null;
+
+function getSettingSeconds() {
+  return minPicker.getValue() * 60 + secPicker.getValue();
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = (sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function updateDisplay() {
+  display.textContent = formatTime(remaining);
+  const ratio = totalSeconds > 0 ? remaining / totalSeconds : 1;
+  ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - ratio);
+  ring.classList.toggle('danger', remaining <= 10 && remaining > 0);
+}
+
+function beep() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  [0, 0.18].forEach(delay => {
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + 0.15);
+  });
+}
+
+function finish() {
+  clearInterval(timerId);
+  timerId = null;
+  running = false;
+  beep();
+  setTimeout(resetToSetting, 600);
+}
+
+function resetToSetting() {
+  totalSeconds = getSettingSeconds();
+  remaining    = totalSeconds;
+  ring.style.strokeDashoffset = 0;
+  ring.classList.remove('danger');
+  updateDisplay();
+  btnStart.textContent = 'スタート';
+  minPicker.disable(false);
+  secPicker.disable(false);
+}
+
+function tick() {
+  remaining--;
+  updateDisplay();
+  if (remaining <= 0) finish();
+}
+
+btnStart.addEventListener('click', () => {
+  if (running) {
     clearInterval(timerId);
     timerId = null;
     running = false;
-    resetToSetting();
-  });
+    btnStart.textContent = '再開';
+  } else {
+    totalSeconds = totalSeconds || getSettingSeconds();
+    remaining    = remaining > 0 ? remaining : getSettingSeconds();
+    if (remaining <= 0) return;
+    running = true;
+    minPicker.disable(true);
+    secPicker.disable(true);
+    btnStart.textContent = '一時停止';
+    timerId = setInterval(tick, 1000);
+  }
+});
 
-  // 設定変更時に表示を即時反映
-  [inputMin, inputSec].forEach(el => {
-    el.addEventListener('input', () => {
-      if (!running) resetToSetting();
-    });
-  });
-
-  // 初期表示
+btnReset.addEventListener('click', () => {
+  clearInterval(timerId);
+  timerId = null;
+  running = false;
   resetToSetting();
+});
+
+resetToSetting();
 </script>
 </body>
 </html>
