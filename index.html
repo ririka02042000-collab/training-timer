@@ -2,12 +2,20 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>トレーニングタイマー</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* iOS Safari で固定してバウンス・スクロールを防ぐ */
+    html, body {
+      position: fixed;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
 
     body {
       background: #1a1a2e;
@@ -54,6 +62,7 @@
       overflow: hidden;
       cursor: grab;
       touch-action: none;
+      -webkit-tap-highlight-color: transparent;
     }
     .drum:active { cursor: grabbing; }
 
@@ -106,7 +115,7 @@
       color: #eee;
     }
 
-    /* ── タイマー表示 ── */
+    /* ── タイマーリング ── */
     .display {
       position: relative;
       width: 200px;
@@ -137,11 +146,7 @@
     }
 
     /* ── ボタン ── */
-    .btn-row {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-    }
+    .btn-row { display: flex; gap: 12px; justify-content: center; }
 
     button {
       padding: 12px 28px;
@@ -155,22 +160,73 @@
     }
     button:active { transform: scale(0.96); }
 
-    #btn-start {
-      background: #5a7fff;
-      color: #fff;
-      min-width: 110px;
-    }
-    #btn-reset {
-      background: #2a3a60;
-      color: #aaa;
-    }
+    #btn-start { background: #5a7fff; color: #fff; min-width: 110px; }
+    #btn-reset { background: #2a3a60; color: #aaa; }
     button:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── キーボード入力モーダル ── */
+    #input-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #input-modal[hidden] { display: none !important; }
+
+    .modal-bg {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+    }
+
+    .modal-box {
+      position: relative;
+      background: #16213e;
+      border-radius: 18px;
+      padding: 24px 20px 20px;
+      width: 220px;
+      text-align: center;
+    }
+
+    .modal-title {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 14px;
+    }
+
+    .modal-box input[type="number"] {
+      width: 100%;
+      background: #0f3460;
+      border: 1px solid #2a4a80;
+      border-radius: 10px;
+      color: #eee;
+      font-size: 2.2rem;
+      font-weight: 700;
+      text-align: center;
+      padding: 8px 4px;
+      outline: none;
+      margin-bottom: 16px;
+      /* iOS でズームしないよう 16px 以上 */
+      font-size: max(16px, 2.2rem);
+    }
+    .modal-box input[type="number"]:focus {
+      border-color: #5a7fff;
+    }
+    /* スピナー非表示 */
+    .modal-box input[type="number"]::-webkit-inner-spin-button,
+    .modal-box input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    .modal-actions { display: flex; gap: 8px; }
+    .modal-actions button { flex: 1; padding: 10px; border-radius: 10px; font-size: 1rem; font-weight: 600; }
+    #modal-cancel { background: #2a3a60; color: #aaa; }
+    #modal-ok     { background: #5a7fff; color: #fff; }
   </style>
 </head>
 <body>
-<div class="container">
-  <!-- タイトルなし -->
 
+<div class="container">
   <div class="picker-wrap">
     <div class="drum" id="drum-min">
       <div class="drum-highlight"></div>
@@ -199,14 +255,289 @@
   </div>
 </div>
 
+<!-- キーボード入力モーダル -->
+<div id="input-modal" hidden>
+  <div class="modal-bg" id="modal-bg"></div>
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <input id="modal-input" type="number" inputmode="numeric" pattern="[0-9]*" min="0">
+    <div class="modal-actions">
+      <button id="modal-cancel">キャンセル</button>
+      <button id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
 <script>
+// ── 定数 ────────────────────────────────────────────
+const ITEM_H       = 44;
+const DRUM_H       = 150;
+const CENTER_OFFSET = (DRUM_H - ITEM_H) / 2; // 53
+const PAD          = 2;   // 非ループドラムの上下パッド数
+const LOOP_COPIES  = 7;   // ループドラムのコピー数（中央: index 3）
+const LOOP_MID     = 3;
+
+// ── キーボード入力モーダル ───────────────────────────
+const inputModal   = document.getElementById('input-modal');
+const modalTitle   = document.getElementById('modal-title');
+const modalInput   = document.getElementById('modal-input');
+const modalOk      = document.getElementById('modal-ok');
+const modalCancel  = document.getElementById('modal-cancel');
+const modalBg      = document.getElementById('modal-bg');
+
+let modalConfirmCb = null;
+
+function showKeyboard(title, max, current, onConfirm) {
+  modalTitle.textContent = title;
+  modalInput.max   = max;
+  modalInput.value = String(current).padStart(2, '0');
+  modalConfirmCb   = onConfirm;
+  inputModal.hidden = false;
+  // 少し遅らせてからフォーカス（iOS対応）
+  setTimeout(() => { modalInput.focus(); modalInput.select(); }, 80);
+}
+
+function closeModal() { inputModal.hidden = true; }
+
+function confirmModal() {
+  let v = parseInt(modalInput.value, 10);
+  if (isNaN(v)) v = 0;
+  v = Math.max(0, Math.min(parseInt(modalInput.max, 10), v));
+  closeModal();
+  if (modalConfirmCb) modalConfirmCb(v);
+}
+
+modalOk.addEventListener('click', confirmModal);
+modalCancel.addEventListener('click', closeModal);
+modalBg.addEventListener('click', closeModal);
+modalInput.addEventListener('keydown', e => { if (e.key === 'Enter') confirmModal(); });
+
+// ── ドラムピッカー ────────────────────────────────────
+// loop=false: 端でクランプ（分）
+// loop=true : 端で折り返し（秒）
+function buildDrum(listEl, count, initialValue, onChange, loop, keyboardLabel) {
+  const copies  = loop ? LOOP_COPIES : 1;
+  const midCopy = loop ? LOOP_MID    : 0;
+  const padTop  = loop ? 0 : PAD;
+
+  // パッドアイテム（非ループのみ）
+  for (let i = 0; i < padTop; i++) {
+    const el = document.createElement('div');
+    el.className = 'drum-item';
+    listEl.appendChild(el);
+  }
+  // 実アイテム
+  for (let i = 0; i < count * copies; i++) {
+    const el = document.createElement('div');
+    el.className = 'drum-item';
+    el.textContent = String(i % count).padStart(2, '0');
+    listEl.appendChild(el);
+  }
+  // パッドアイテム（非ループのみ）
+  for (let i = 0; i < padTop; i++) {
+    const el = document.createElement('div');
+    el.className = 'drum-item';
+    listEl.appendChild(el);
+  }
+
+  // リストインデックス → Y座標（listEl の translateY）
+  function idxToY(idx) {
+    return CENTER_OFFSET - (padTop + idx) * ITEM_H;
+  }
+  // Y座標 → 最寄りリストインデックス
+  function yToIdx(y) {
+    return Math.round((CENTER_OFFSET - y) / ITEM_H) - padTop;
+  }
+
+  // 非ループ時のY範囲
+  const maxY = loop ? Infinity  : idxToY(0);
+  const minY = loop ? -Infinity : idxToY(count - 1);
+
+  const initialIdx = midCopy * count + initialValue;
+  let currentY     = idxToY(initialIdx);
+  let currentValue = initialValue;
+
+  function applyY(y, animate) {
+    currentY = y;
+    listEl.style.transition = animate
+      ? 'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94)'
+      : 'none';
+    listEl.style.transform = `translateY(${y}px)`;
+  }
+
+  // ループ時: 中央コピーに静かにジャンプ
+  function recenterLoop(snapIdx) {
+    const normalized = LOOP_MID * count + (snapIdx % count + count) % count;
+    if (snapIdx !== normalized) {
+      setTimeout(() => {
+        currentY = idxToY(normalized);
+        listEl.style.transition = 'none';
+        listEl.style.transform = `translateY(${currentY}px)`;
+      }, 240);
+    }
+  }
+
+  function snapToIdx(idx, animate = true) {
+    if (loop) {
+      idx = Math.max(0, Math.min(count * copies - 1, idx));
+      currentValue = ((idx % count) + count) % count;
+    } else {
+      idx = Math.max(0, Math.min(count - 1, idx));
+      currentValue = idx;
+    }
+    applyY(idxToY(loop ? idx : idx), animate);
+    onChange(currentValue);
+    if (loop) recenterLoop(idx);
+  }
+
+  function snapToValue(v, animate = true) {
+    const targetIdx = loop ? LOOP_MID * count + ((v % count + count) % count) : v;
+    snapToIdx(targetIdx, animate);
+  }
+
+  applyY(idxToY(initialIdx), false);
+
+  // ─ ドラッグ ─
+  const drum    = listEl.parentElement;
+  let dragging  = false;
+  let startPY   = 0;
+  let startLY   = 0;
+  let prevPY    = 0;
+  let prevTime  = 0;
+  let velocity  = 0;
+  let rafId     = null;
+
+  function cy(e) { return e.touches ? e.touches[0].clientY : e.clientY; }
+
+  drum.addEventListener('pointerdown', e => {
+    dragging = true;
+    startPY  = cy(e);
+    startLY  = currentY;
+    prevPY   = startPY;
+    prevTime = Date.now();
+    velocity = 0;
+    listEl.style.transition = 'none';
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    drum.setPointerCapture(e.pointerId);
+  });
+
+  drum.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const clientY = cy(e);
+    const raw     = startLY + (clientY - startPY);
+    const now     = Date.now();
+    velocity = (clientY - prevPY) / Math.max(1, now - prevTime) * 16;
+    prevPY   = clientY;
+    prevTime = now;
+
+    if (!loop) {
+      let y = raw;
+      if (raw > maxY) y = maxY + (raw - maxY) * 0.25;
+      else if (raw < minY) y = minY + (raw - minY) * 0.25;
+      applyY(y, false);
+    } else {
+      applyY(raw, false);
+    }
+  });
+
+  drum.addEventListener('pointerup', e => {
+    if (!dragging) return;
+    dragging = false;
+
+    const moved = Math.abs(cy(e) - startPY);
+
+    // タップ判定
+    if (moved < 8) {
+      const tapRelY  = e.clientY - drum.getBoundingClientRect().top;
+      const tapRaw   = Math.floor((tapRelY - currentY) / ITEM_H) - padTop;
+      const tapValue = loop
+        ? ((tapRaw % count) + count) % count
+        : Math.max(0, Math.min(count - 1, tapRaw));
+
+      if (tapValue === currentValue) {
+        // 中央をタップ → キーボード入力
+        showKeyboard(keyboardLabel, count - 1, currentValue, v => snapToValue(v));
+      } else {
+        snapToValue(tapValue);
+      }
+      return;
+    }
+
+    // 非ループ: 範囲外ならスナップバック
+    if (!loop && (currentY > maxY || currentY < minY)) {
+      snapToIdx(Math.max(0, Math.min(count - 1, yToIdx(currentY))));
+      return;
+    }
+
+    // 慣性スクロール
+    if (Math.abs(velocity) > 2) {
+      function glide() {
+        currentY += velocity;
+        velocity *= 0.90;
+
+        if (!loop) {
+          if (currentY > maxY) { snapToIdx(0); return; }
+          if (currentY < minY) { snapToIdx(count - 1); return; }
+        } else {
+          // 端に近づいたら中央コピーに静かにジャンプ（速度維持）
+          const curIdx = yToIdx(currentY);
+          if (curIdx < count || curIdx >= count * (copies - 1)) {
+            const norm = LOOP_MID * count + ((curIdx % count + count) % count);
+            const diff = currentY - idxToY(curIdx);
+            currentY   = idxToY(norm) + diff;
+          }
+        }
+
+        if (Math.abs(velocity) < 0.5) {
+          const idx = yToIdx(currentY);
+          snapToIdx(loop ? Math.max(0, Math.min(count * copies - 1, idx)) : Math.max(0, Math.min(count - 1, idx)));
+          return;
+        }
+        listEl.style.transition = 'none';
+        listEl.style.transform  = `translateY(${currentY}px)`;
+        rafId = requestAnimationFrame(glide);
+      }
+      rafId = requestAnimationFrame(glide);
+    } else {
+      const idx = yToIdx(currentY);
+      snapToIdx(loop ? Math.max(0, Math.min(count * copies - 1, idx)) : Math.max(0, Math.min(count - 1, idx)));
+    }
+  });
+
+  drum.addEventListener('wheel', e => {
+    e.preventDefault();
+    snapToValue(loop
+      ? ((currentValue + (e.deltaY > 0 ? 1 : -1) + count) % count)
+      : currentValue + (e.deltaY > 0 ? 1 : -1)
+    );
+  }, { passive: false });
+
+  return {
+    getValue:  () => currentValue,
+    setValue:  (v) => snapToValue(v, false),
+    disable:   (d) => { drum.style.pointerEvents = d ? 'none' : ''; }
+  };
+}
+
+// ── ピッカー初期化 ─────────────────────────────────
+let running = false;
+
+const minPicker = buildDrum(
+  document.getElementById('list-min'), 100, 1,
+  () => { if (!running) resetToSetting(); },
+  false, '分を入力 (0〜99)'
+);
+const secPicker = buildDrum(
+  document.getElementById('list-sec'), 60, 30,
+  () => { if (!running) resetToSetting(); },
+  true, '秒を入力 (0〜59)'
+);
+
 // ── 音声 (iOS 対応) ────────────────────────────────
 let audioCtx = null;
 
 function getAudioCtx() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
 
@@ -231,189 +562,11 @@ function beep() {
       osc.stop(ctx.currentTime + delay + 0.15);
     });
   };
-  if (ctx.state === 'suspended') {
-    ctx.resume().then(play);
-  } else {
-    play();
-  }
+  ctx.state === 'suspended' ? ctx.resume().then(play) : play();
 }
-
-// ── ドラムピッカー ────────────────────────────────
-const ITEM_H = 44;
-const DRUM_H = 150;
-const PAD    = 2;
-const CENTER_OFFSET = (DRUM_H - ITEM_H) / 2; // 53
-
-function buildDrum(listEl, count, initialValue, onChange) {
-  // 上パッド（空）
-  for (let i = 0; i < PAD; i++) {
-    const div = document.createElement('div');
-    div.className = 'drum-item';
-    listEl.appendChild(div);
-  }
-  // 実アイテム 0..count-1
-  for (let i = 0; i < count; i++) {
-    const div = document.createElement('div');
-    div.className = 'drum-item';
-    div.textContent = String(i).padStart(2, '0');
-    listEl.appendChild(div);
-  }
-  // 下パッド（空）
-  for (let i = 0; i < PAD; i++) {
-    const div = document.createElement('div');
-    div.className = 'drum-item';
-    listEl.appendChild(div);
-  }
-
-  // 値 v に対応する listEl の translateY
-  function valueToY(v) {
-    return CENTER_OFFSET - (PAD + v) * ITEM_H;
-  }
-
-  // translateY から値に変換（端でクランプ）
-  function yToValue(y) {
-    const raw = Math.round((CENTER_OFFSET - y) / ITEM_H) - PAD;
-    return Math.max(0, Math.min(count - 1, raw));
-  }
-
-  // スクロール可能なY範囲
-  const maxY = valueToY(0);           // 最小値(0)表示時
-  const minY = valueToY(count - 1);   // 最大値表示時
-
-  let currentY     = valueToY(initialValue);
-  let currentValue = initialValue;
-
-  function applyY(y, animate) {
-    currentY = y;
-    listEl.style.transition = animate
-      ? 'transform 0.22s cubic-bezier(0.25,0.46,0.45,0.94)'
-      : 'none';
-    listEl.style.transform = `translateY(${y}px)`;
-  }
-
-  function snapToValue(v, animate = true) {
-    currentValue = Math.max(0, Math.min(count - 1, v));
-    applyY(valueToY(currentValue), animate);
-    onChange(currentValue);
-  }
-
-  applyY(valueToY(initialValue), false);
-
-  // ─ ドラッグ ─
-  let dragging   = false;
-  let startPY    = 0;
-  let startListY = 0;
-  let prevPY     = 0;
-  let prevTime   = 0;
-  let velocity   = 0;
-  let rafId      = null;
-  const RESISTANCE = 0.25; // 端を超えたときの引っ張り抵抗
-
-  const drum = listEl.parentElement;
-
-  function getClientY(e) {
-    return e.touches ? e.touches[0].clientY : e.clientY;
-  }
-
-  drum.addEventListener('pointerdown', e => {
-    dragging   = true;
-    startPY    = getClientY(e);
-    startListY = currentY;
-    prevPY     = startPY;
-    prevTime   = Date.now();
-    velocity   = 0;
-    listEl.style.transition = 'none';
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    drum.setPointerCapture(e.pointerId);
-  });
-
-  drum.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const cy  = getClientY(e);
-    const raw = startListY + (cy - startPY);
-    const now = Date.now();
-    velocity  = (cy - prevPY) / Math.max(1, now - prevTime) * 16;
-    prevPY    = cy;
-    prevTime  = now;
-
-    // 端を超えたら抵抗をかける
-    let y = raw;
-    if (raw > maxY) y = maxY + (raw - maxY) * RESISTANCE;
-    else if (raw < minY) y = minY + (raw - minY) * RESISTANCE;
-    applyY(y, false);
-  });
-
-  drum.addEventListener('pointerup', e => {
-    if (!dragging) return;
-    dragging = false;
-
-    const moved = Math.abs(getClientY(e) - startPY);
-
-    // タップ判定（移動が小さければ選択）
-    if (moved < 8) {
-      const tapRelY  = e.clientY - drum.getBoundingClientRect().top;
-      const listIdx  = Math.floor((tapRelY - currentY) / ITEM_H);
-      const tapValue = listIdx - PAD;
-      snapToValue(tapValue);
-      return;
-    }
-
-    // 端を超えていたらクランプして即スナップ
-    if (currentY > maxY || currentY < minY) {
-      snapToValue(yToValue(currentY));
-      return;
-    }
-
-    // 慣性スクロール
-    if (Math.abs(velocity) > 2) {
-      function glide() {
-        currentY += velocity;
-        velocity *= 0.90;
-
-        // 端に達したら止める
-        if (currentY > maxY) { snapToValue(0); return; }
-        if (currentY < minY) { snapToValue(count - 1); return; }
-
-        if (Math.abs(velocity) < 0.5) {
-          snapToValue(yToValue(currentY));
-          return;
-        }
-        listEl.style.transition = 'none';
-        listEl.style.transform = `translateY(${currentY}px)`;
-        rafId = requestAnimationFrame(glide);
-      }
-      rafId = requestAnimationFrame(glide);
-    } else {
-      snapToValue(yToValue(currentY));
-    }
-  });
-
-  // ホイール
-  drum.addEventListener('wheel', e => {
-    e.preventDefault();
-    snapToValue(currentValue + (e.deltaY > 0 ? 1 : -1));
-  }, { passive: false });
-
-  return {
-    getValue: () => currentValue,
-    setValue: (v) => snapToValue(v, false),
-    disable:  (d) => { drum.style.pointerEvents = d ? 'none' : ''; }
-  };
-}
-
-// ── ピッカー初期化 ─────────────────────────────────
-let running = false;
-
-const minPicker = buildDrum(document.getElementById('list-min'), 100, 1, () => {
-  if (!running) resetToSetting();
-});
-const secPicker = buildDrum(document.getElementById('list-sec'), 60, 30, () => {
-  if (!running) resetToSetting();
-});
 
 // ── タイマーロジック ───────────────────────────────
 const CIRCUMFERENCE = 2 * Math.PI * 88;
-
 const display  = document.getElementById('display');
 const ring     = document.getElementById('ring');
 const btnStart = document.getElementById('btn-start');
@@ -428,9 +581,7 @@ function getSettingSeconds() {
 }
 
 function formatTime(sec) {
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
-  const s = (sec % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
+  return `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
 }
 
 function updateDisplay() {
@@ -466,7 +617,7 @@ function tick() {
 }
 
 btnStart.addEventListener('click', () => {
-  unlockAudio(); // iOS: ユーザー操作でAudioContextを解放
+  unlockAudio();
   if (running) {
     clearInterval(timerId);
     timerId = null;
