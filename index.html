@@ -219,7 +219,7 @@
     .modal-box input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
 
     .modal-actions { display: flex; gap: 8px; }
-    .modal-actions button { flex: 1; padding: 10px; border-radius: 10px; font-size: 1rem; font-weight: 600; }
+    .modal-actions button { flex: 1; padding: 10px; border-radius: 10px; font-size: 1rem; font-weight: 600; white-space: nowrap; }
     #modal-cancel { background: #2a3a60; color: #aaa; }
     #modal-ok     { background: #5a7fff; color: #fff; }
   </style>
@@ -528,7 +528,7 @@ const minPicker = buildDrum(
   false, '分を入力 (0〜99)'
 );
 const secPicker = buildDrum(
-  document.getElementById('list-sec'), 60, 30,
+  document.getElementById('list-sec'), 60, 0,
   () => { if (!running) resetToSetting(); },
   true, '秒を入力 (0〜59)'
 );
