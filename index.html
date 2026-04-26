@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>筋トレタイマー</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      text-align: center;
+      padding: 40px 32px;
+      background: #16213e;
+      border-radius: 24px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      width: 320px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: #a0b4ff;
+      margin-bottom: 32px;
+    }
+
+    .time-setting {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 36px;
+    }
+
+    .time-setting label {
+      font-size: 0.85rem;
+      color: #888;
+    }
+
+    .time-inputs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .time-inputs input {
+      width: 52px;
+      padding: 6px 4px;
+      background: #0f3460;
+      border: 1px solid #2a4a80;
+      border-radius: 8px;
+      color: #eee;
+      font-size: 1.1rem;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .time-inputs input:focus {
+      border-color: #5a7fff;
+    }
+
+    .time-inputs span {
+      color: #888;
+      font-size: 1rem;
+    }
+
+    .display {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      margin: 0 auto 36px;
+    }
+
+    .ring-bg {
+      stroke: #0f3460;
+    }
+
+    .ring-progress {
+      stroke: #5a7fff;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.5s linear, stroke 0.3s;
+      transform-origin: center;
+      transform: rotate(-90deg);
+    }
+
+    .ring-progress.danger {
+      stroke: #ff5a5a;
+    }
+
+    .time-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2.8rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+    }
+
+    button {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+
+    button:active {
+      transform: scale(0.96);
+    }
+
+    #btn-start {
+      background: #5a7fff;
+      color: #fff;
+      min-width: 100px;
+    }
+
+    #btn-reset {
+      background: #2a3a60;
+      color: #aaa;
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>筋トレタイマー</h1>
+
+  <div class="time-setting">
+    <label>時間設定</label>
+    <div class="time-inputs">
+      <input type="number" id="input-min" min="0" max="99" value="1" placeholder="00">
+      <span>分</span>
+      <input type="number" id="input-sec" min="0" max="59" value="30" placeholder="00">
+      <span>秒</span>
+    </div>
+  </div>
+
+  <div class="display">
+    <svg width="200" height="200" viewBox="0 0 200 200">
+      <circle class="ring-bg" cx="100" cy="100" r="88" fill="none" stroke-width="10"/>
+      <circle id="ring" class="ring-progress" cx="100" cy="100" r="88" fill="none" stroke-width="10"
+        stroke-dasharray="553" stroke-dashoffset="0"/>
+    </svg>
+    <div class="time-text" id="display">01:30</div>
+  </div>
+
+  <div class="btn-row">
+    <button id="btn-start">スタート</button>
+    <button id="btn-reset">リセット</button>
+  </div>
+</div>
+
+<script>
+  const CIRCUMFERENCE = 2 * Math.PI * 88; // ≈553
+
+  const inputMin = document.getElementById('input-min');
+  const inputSec = document.getElementById('input-sec');
+  const display  = document.getElementById('display');
+  const ring     = document.getElementById('ring');
+  const btnStart = document.getElementById('btn-start');
+  const btnReset = document.getElementById('btn-reset');
+
+  let totalSeconds  = 0;
+  let remaining     = 0;
+  let timerId       = null;
+  let running       = false;
+
+  function getSettingSeconds() {
+    const m = Math.max(0, parseInt(inputMin.value) || 0);
+    const s = Math.max(0, Math.min(59, parseInt(inputSec.value) || 0));
+    return m * 60 + s;
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function updateDisplay() {
+    display.textContent = formatTime(remaining);
+    const ratio = totalSeconds > 0 ? remaining / totalSeconds : 1;
+    ring.style.strokeDashoffset = CIRCUMFERENCE * (1 - ratio);
+    ring.classList.toggle('danger', remaining <= 10 && remaining > 0);
+  }
+
+  function beep() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.18].forEach(delay => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.6, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.15);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.15);
+    });
+  }
+
+  function finish() {
+    clearInterval(timerId);
+    timerId  = null;
+    running  = false;
+    beep();
+    setTimeout(resetToSetting, 600);
+  }
+
+  function resetToSetting() {
+    totalSeconds = getSettingSeconds();
+    remaining    = totalSeconds;
+    ring.style.strokeDashoffset = 0;
+    ring.classList.remove('danger');
+    updateDisplay();
+    btnStart.textContent = 'スタート';
+    setInputsDisabled(false);
+  }
+
+  function setInputsDisabled(disabled) {
+    inputMin.disabled = disabled;
+    inputSec.disabled = disabled;
+  }
+
+  function tick() {
+    remaining--;
+    updateDisplay();
+    if (remaining <= 0) finish();
+  }
+
+  btnStart.addEventListener('click', () => {
+    if (running) {
+      // 一時停止
+      clearInterval(timerId);
+      timerId = null;
+      running = false;
+      btnStart.textContent = '再開';
+    } else {
+      if (!timerId && remaining === 0) resetToSetting();
+      if (!timerId) {
+        totalSeconds = remaining > 0 ? totalSeconds : getSettingSeconds();
+        if (remaining === 0) remaining = totalSeconds;
+      }
+      totalSeconds = totalSeconds || getSettingSeconds();
+      remaining    = remaining > 0 ? remaining : getSettingSeconds();
+      if (remaining <= 0) return;
+      running  = true;
+      setInputsDisabled(true);
+      btnStart.textContent = '一時停止';
+      timerId = setInterval(tick, 1000);
+    }
+  });
+
+  btnReset.addEventListener('click', () => {
+    clearInterval(timerId);
+    timerId = null;
+    running = false;
+    resetToSetting();
+  });
+
+  // 設定変更時に表示を即時反映
+  [inputMin, inputSec].forEach(el => {
+    el.addEventListener('input', () => {
+      if (!running) resetToSetting();
+    });
+  });
+
+  // 初期表示
+  resetToSetting();
+</script>
+</body>
+</html>
